@@ -70,6 +70,8 @@
                     </div>
                     <div class="col-md-6">
                         <table class="table table-borderless">
+                            @if(!$transaction->hasItems() || $transaction->items->count() == 1)
+                            <!-- Only show these for simple mode -->
                             <tr>
                                 <td width="200"><strong>Lawan Transaksi</strong></td>
                                 <td>: {{ $transaction->lawan_transaksi ?? '-' }}</td>
@@ -86,10 +88,13 @@
                                 <td><strong>Pengakuan Transaksi</strong></td>
                                 <td>: {{ $transaction->pengakuan_transaksi ?? '-' }}</td>
                             </tr>
+                            @endif
                         </table>
                     </div>
                 </div>
 
+                @if(!$transaction->hasItems() || $transaction->items->count() == 1)
+                <!-- Only show these sections for simple mode -->
                 <div class="row mb-4">
                     <div class="col-12">
                         <h6>Uraian Transaksi</h6>
@@ -120,14 +125,132 @@
                     </div>
                 </div>
                 @endif
+                @endif
 
-                @if($transaction->lampiran_dokumen)
+                <!-- Transaction Items Table -->
+                @if($transaction->hasItems() && $transaction->items->count() > 1)
                 <div class="row mb-4">
                     <div class="col-12">
-                        <h6>Lampiran Dokumen</h6>
-                        <a href="{{ Storage::url($transaction->lampiran_dokumen) }}" target="_blank" class="btn btn-sm btn-primary">
-                            <i class="bi bi-file-earmark-arrow-down"></i> Download Lampiran
-                        </a>
+                        <h6 class="mb-3">Detail Transaksi</h6>
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover table-sm">
+                                <thead class="table-primary">
+                                    <tr>
+                                        <th width="3%">No</th>
+                                        <th width="15%">Uraian Transaksi</th>
+                                        <th width="8%">Total</th>
+                                        <th width="15%">Dasar Transaksi</th>
+                                        <th width="10%">Lawan Transaksi</th>
+                                        <th width="10%">Rekening</th>
+                                        <th width="8%">Tgl Rencana</th>
+                                        <th width="10%">Pengakuan</th>
+                                        <th width="15%">Keterangan</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @php
+                                        $groupedItems = [];
+                                        foreach($transaction->items as $item) {
+                                            $uraian = $item->uraian_transaksi;
+                                            if (!isset($groupedItems[$uraian])) {
+                                                $groupedItems[$uraian] = [];
+                                            }
+                                            $groupedItems[$uraian][] = $item;
+                                        }
+                                        $groupNo = 1;
+                                    @endphp
+                                    
+                                    @foreach($groupedItems as $uraian => $items)
+                                        @foreach($items as $index => $item)
+                                            <tr>
+                                                @if($index === 0)
+                                                    <td class="text-center" rowspan="{{ count($items) }}"><strong>{{ $groupNo }}</strong></td>
+                                                    <td>
+                                                        <strong>{{ $uraian }}</strong><br>
+                                                        <small style="padding-left: 15px;">{{ $item->kebutuhan }}</small>
+                                                    </td>
+                                                @else
+                                                    <td style="padding-left: 20px;"><small>{{ $item->kebutuhan }}</small></td>
+                                                @endif
+                                                <td class="text-end"><small>{{ number_format($item->total, 0, ',', '.') }}</small></td>
+                                                <td><small>{{ $item->dasar_transaksi ?? '-' }}</small></td>
+                                                <td><small>{{ $item->lawan_transaksi ?? '-' }}</small></td>
+                                                <td><small>{{ $item->rekening_transaksi ?? '-' }}</small></td>
+                                                <td><small>{{ $item->rencana_tanggal_transaksi ? $item->rencana_tanggal_transaksi->format('d/m/Y') : '-' }}</small></td>
+                                                <td><small>{{ $item->pengakuan_transaksi ?? '-' }}</small></td>
+                                                <td><small>{{ $item->keterangan ?? '-' }}</small></td>
+                                            </tr>
+                                        @endforeach
+                                        @php $groupNo++; @endphp
+                                    @endforeach
+                                </tbody>
+                                <tfoot class="table-secondary">
+                                    <tr>
+                                        <th colspan="2" class="text-end">TOTAL:</th>
+                                        <th class="text-end">Rp {{ number_format($transaction->getTotalFromItems(), 0, ',', '.') }}</th>
+                                        <th colspan="6"></th>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                @endif
+
+                @if($transaction->dasar_transaksi && !$transaction->hasItems())
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <h6>Dasar Transaksi</h6>
+                        <div class="border rounded p-3 bg-light">
+                            {{ $transaction->dasar_transaksi }}
+                        </div>
+                    </div>
+                </div>
+                @endif
+
+                @if($transaction->keterangan)
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <h6>Keterangan</h6>
+                        <div class="border rounded p-3 bg-light">
+                            {{ $transaction->keterangan }}
+                        </div>
+                    </div>
+                </div>
+                @endif
+
+                <!-- Download Section -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <h6 class="mb-3">Lampiran & Dokumen</h6>
+                        <div class="d-flex gap-2 flex-wrap">
+                            @if($transaction->excel_path)
+                            <a href="{{ route('transactions.downloadExcel', $transaction->id) }}" class="btn btn-success">
+                                <i class="bi bi-file-earmark-excel"></i> Download Form Excel
+                            </a>
+                            @endif
+                            
+                            @if($transaction->lampiran_dokumen)
+                            <a href="{{ Storage::url($transaction->lampiran_dokumen) }}" target="_blank" class="btn btn-primary">
+                                <i class="bi bi-file-earmark-arrow-down"></i> Download Lampiran Upload
+                            </a>
+                            @endif
+                            
+                            @if($transaction->excel_path || $transaction->lampiran_dokumen)
+                            <a href="{{ route('transactions.downloadAll', $transaction->id) }}" class="btn btn-warning">
+                                <i class="bi bi-file-earmark-zip"></i> Download Semua (ZIP)
+                            </a>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+
+                @if(!$transaction->excel_path && !$transaction->lampiran_dokumen)
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="alert alert-info mb-0">
+                            <i class="bi bi-info-circle"></i> Tidak ada lampiran dokumen
+                        </div>
                     </div>
                 </div>
                 @endif

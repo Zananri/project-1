@@ -29,6 +29,7 @@ class Transaction extends Model
         'tanggal_disetujui',
         'tanggal_ditolak',
         'lampiran_dokumen',
+        'excel_path',
     ];
 
     protected $casts = [
@@ -49,6 +50,21 @@ class Transaction extends Model
         return $this->hasMany(TransactionApproval::class);
     }
 
+    public function items()
+    {
+        return $this->hasMany(TransactionItem::class)->orderBy('urutan');
+    }
+
+    public function hasItems()
+    {
+        return $this->items()->count() > 0;
+    }
+
+    public function getTotalFromItems()
+    {
+        return $this->items()->sum('total');
+    }
+
     public function getApprovalByRole($role)
     {
         return $this->approvals()->where('role', $role)->first();
@@ -57,13 +73,11 @@ class Transaction extends Model
     public function getCurrentApprovalStep()
     {
         $statusMap = [
-            'menunggu_pejabat_1' => 'pejabat_1',
-            'diskusi_pra_permohonan' => 'pejabat_2',
-            'menunggu_pejabat_2' => 'pejabat_2',
-            'pemeriksaan_tahap_2' => 'pejabat_2',
-            'dilengkapi' => 'pejabat_2',
-            'menunggu_pejabat_3' => 'pejabat_3',
+            'diskusi_pra_permohonan' => 'pejabat_1',
+            'pemeriksaan_tahap_1' => 'pejabat_2',
+            'pemeriksaan_tahap_2' => 'pejabat_3',
             'menunggu_pejabat_4' => 'pejabat_4',
+            'dilengkapi' => 'pejabat_2',
             'disetujui_pejabat_4' => 'pejabat_3', // Backward: P3 menerima dari P4
             'diinformasikan' => 'pejabat_2', // Backward: P2 menerima dari P3
         ];

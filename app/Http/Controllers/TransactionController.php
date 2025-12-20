@@ -210,35 +210,124 @@ class TransactionController extends Controller
     public function store(Request $request)
     {
         try {
-            $validated = $request->validate([
-                'nama_pemohon' => 'required|string|max:255',
-                'nama_perusahaan' => 'required|string|max:255',
-                'tanggal_pengajuan' => 'required|date',
-                'uraian_transaksi' => 'required|string',
-                'total' => 'required|numeric|min:0',
-                'dasar_transaksi' => 'nullable|string',
-                'lawan_transaksi' => 'nullable|string|max:255',
-                'rekening_transaksi' => 'nullable|string|max:255',
-                'rencana_tanggal_transaksi' => 'nullable|date',
-                'pengakuan_transaksi' => 'nullable|string|max:255',
-                'keterangan' => 'nullable|string',
-                'lampiran_dokumen' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,jpg,jpeg,png|max:5120',
-            ]);
+            // Check if using detailed mode (multiple items)
+            $isDetailed = $request->has('use_detailed_mode') && $request->use_detailed_mode == '1';
+            
+            if ($isDetailed) {
+                // Detailed mode validation
+                $validated = $request->validate([
+                    'nama_pemohon' => 'required|string|max:255',
+                    'nama_perusahaan' => 'required|string|max:255',
+                    'tanggal_pengajuan' => 'required|date',
+                    'keterangan' => 'nullable|string',
+                    'lampiran_dokumen' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,jpg,jpeg,png|max:5120',
+                    'items' => 'required|array|min:1',
+                    'items.*.uraian_transaksi' => 'required|string',
+                    'items.*.kebutuhan' => 'required|string',
+                    'items.*.total' => 'required|numeric|min:0',
+                    'items.*.dasar_transaksi' => 'nullable|string',
+                    'items.*.lawan_transaksi' => 'nullable|string',
+                    'items.*.rekening_transaksi' => 'nullable|string',
+                    'items.*.rencana_tanggal_transaksi' => 'nullable|date',
+                    'items.*.pengakuan_transaksi' => 'nullable|string',
+                    'items.*.keterangan_item' => 'nullable|string',
+                ]);
+            } else {
+                // Simple mode validation (backward compatible)
+                $validated = $request->validate([
+                    'nama_pemohon' => 'required|string|max:255',
+                    'nama_perusahaan' => 'required|string|max:255',
+                    'tanggal_pengajuan' => 'required|date',
+                    'uraian_transaksi' => 'required|string',
+                    'total' => 'required|numeric|min:0',
+                    'dasar_transaksi' => 'nullable|string',
+                    'lawan_transaksi' => 'nullable|string|max:255',
+                    'rekening_transaksi' => 'nullable|string|max:255',
+                    'rencana_tanggal_transaksi' => 'nullable|date',
+                    'pengakuan_transaksi' => 'nullable|string|max:255',
+                    'keterangan' => 'nullable|string',
+                    'lampiran_dokumen' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,jpg,jpeg,png|max:5120',
+                ]);
+            }
 
             DB::beginTransaction();
 
-            $validated['user_id'] = Auth::id();
-            $validated['status'] = 'draft';
+            $transactionData = [
+                'user_id' => Auth::id(),
+                'nama_pemohon' => $validated['nama_pemohon'],
+                'nama_perusahaan' => $validated['nama_perusahaan'],
+                'tanggal_pengajuan' => $validated['tanggal_pengajuan'],
+                'status' => 'diskusi_pra_permohonan',
+                'keterangan' => $validated['keterangan'] ?? null,
+            ];
+            
+            // For backward compatibility, set main transaction fields for simple mode
+            if (!$isDetailed) {
+                $transactionData['uraian_transaksi'] = $validated['uraian_transaksi'];
+                $transactionData['total'] = $validated['total'];
+                $transactionData['dasar_transaksi'] = $validated['dasar_transaksi'] ?? null;
+                $transactionData['lawan_transaksi'] = $validated['lawan_transaksi'] ?? null;
+                $transactionData['rekening_transaksi'] = $validated['rekening_transaksi'] ?? null;
+                $transactionData['rencana_tanggal_transaksi'] = $validated['rencana_tanggal_transaksi'] ?? null;
+                $transactionData['pengakuan_transaksi'] = $validated['pengakuan_transaksi'] ?? null;
+            } else {
+                // For detailed mode, set a combined uraian from items
+                $transactionData['uraian_transaksi'] = 'Multiple items - see details';
+                $transactionData['total'] = 0; // Will be updated after items creation
+            }
 
             // Handle file upload
             if ($request->hasFile('lampiran_dokumen')) {
                 $file = $request->file('lampiran_dokumen');
                 $filename = time() . '_' . $file->getClientOriginalName();
                 $path = $file->storeAs('transactions', $filename, 'public');
-                $validated['lampiran_dokumen'] = $path;
+                $transactionData['lampiran_dokumen'] = $path;
             }
 
-            $transaction = Transaction::create($validated);
+            $transaction = Transaction::create($transactionData);
+
+            // Create items if using detailed mode
+            if ($isDetailed && isset($validated['items'])) {
+                $totalSum = 0;
+                foreach ($validated['items'] as $index => $itemData) {
+                    \App\Models\TransactionItem::create([
+                        'transaction_id' => $transaction->id,
+                        'uraian_transaksi' => $itemData['uraian_transaksi'] ?? '',
+                        'kebutuhan' => $itemData['kebutuhan'] ?? '',
+                        'total' => $itemData['total'] ?? 0,
+                        'dasar_transaksi' => $itemData['dasar_transaksi'] ?? null,
+                        'lawan_transaksi' => $itemData['lawan_transaksi'] ?? null,
+                        'rekening_transaksi' => $itemData['rekening_transaksi'] ?? null,
+                        'rencana_tanggal_transaksi' => $itemData['rencana_tanggal_transaksi'] ?? null,
+                        'pengakuan_transaksi' => $itemData['pengakuan_transaksi'] ?? null,
+                        'keterangan' => $itemData['keterangan_item'] ?? null,
+                        'urutan' => $index + 1,
+                        'parent_urutan' => $itemData['parent_urutan'] ?? null,
+                    ]);
+                    $totalSum += $itemData['total'];
+                }
+                // Update transaction total from items
+                $transaction->update(['total' => $totalSum]);
+            } else {
+                // Create single item from main transaction data for simple mode
+                \App\Models\TransactionItem::create([
+                    'transaction_id' => $transaction->id,
+                    'uraian_transaksi' => $validated['uraian_transaksi'],
+                    'total' => $validated['total'],
+                    'dasar_transaksi' => $validated['dasar_transaksi'] ?? null,
+                    'lawan_transaksi' => $validated['lawan_transaksi'] ?? null,
+                    'rekening_transaksi' => $validated['rekening_transaksi'] ?? null,
+                    'rencana_tanggal_transaksi' => $validated['rencana_tanggal_transaksi'] ?? null,
+                    'pengakuan_transaksi' => $validated['pengakuan_transaksi'] ?? null,
+                    'keterangan' => null,
+                    'urutan' => 1,
+                ]);
+            }
+
+            // Generate Excel file
+            $excelService = new \App\Services\ExcelGeneratorService();
+            $excelPath = $excelService->generateTransactionExcel($transaction->fresh(['items']));
+            $transaction->update(['excel_path' => $excelPath]);
 
             // Create approval records for all pejabat
             $pejabatRoles = ['pejabat_1', 'pejabat_2', 'pejabat_3', 'pejabat_4'];
@@ -282,7 +371,7 @@ class TransactionController extends Controller
      */
     public function show(Transaction $transaction)
     {
-        $transaction->load(['user', 'approvals.user']);
+        $transaction->load(['user', 'approvals.user', 'items']);
         return view('transactions.show', compact('transaction'));
     }
 
@@ -507,32 +596,13 @@ class TransactionController extends Controller
     public function submit(Transaction $transaction)
     {
         try {
-            if ($transaction->status !== 'draft') {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Transaksi sudah diajukan sebelumnya.',
-                ], 400);
-            }
-
-            if ($transaction->user_id !== Auth::id()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Anda tidak memiliki akses untuk mengajukan transaksi ini.',
-                ], 403);
-            }
-
-            DB::beginTransaction();
-
-            $transaction->update(['status' => 'menunggu_pejabat_1']);
-
-            DB::commit();
-
+            // Since status is now 'diskusi_pra_permohonan' by default, just return success
+            // No need to change status anymore
             return response()->json([
                 'success' => true,
-                'message' => 'Transaksi berhasil diajukan untuk persetujuan Pejabat 1',
+                'message' => 'Transaksi berhasil diajukan untuk persetujuan.',
             ]);
         } catch (\Exception $e) {
-            DB::rollBack();
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mengajukan transaksi: ' . $e->getMessage(),
@@ -568,13 +638,27 @@ class TransactionController extends Controller
 
             DB::beginTransaction();
 
-            // Update approval record
+            // Save current status before update
+            $currentStatus = $transaction->status;
+
+            // Update or create approval record
             $approval = $transaction->getApprovalByRole($user->role);
             if ($approval) {
                 $approval->update([
                     'status' => 'approved',
                     'catatan' => $validated['catatan'] ?? null,
                     'tanggal_approval' => now(),
+                    'status_at_approval' => $currentStatus,
+                ]);
+            } else {
+                // Create new approval if doesn't exist (for pejabat 2 second approval)
+                TransactionApproval::create([
+                    'transaction_id' => $transaction->id,
+                    'role' => $user->role,
+                    'status' => 'approved',
+                    'catatan' => $validated['catatan'] ?? null,
+                    'tanggal_approval' => now(),
+                    'status_at_approval' => $currentStatus,
                 ]);
             }
 
@@ -648,13 +732,27 @@ class TransactionController extends Controller
 
             DB::beginTransaction();
 
-            // Update approval record
+            // Save current status before update
+            $currentStatus = $transaction->status;
+
+            // Update or create approval record
             $approval = $transaction->getApprovalByRole($user->role);
             if ($approval) {
                 $approval->update([
                     'status' => 'rejected',
                     'catatan' => $validated['alasan_penolakan'],
                     'tanggal_approval' => now(),
+                    'status_at_approval' => $currentStatus,
+                ]);
+            } else {
+                // Create new approval if doesn't exist
+                TransactionApproval::create([
+                    'transaction_id' => $transaction->id,
+                    'role' => $user->role,
+                    'status' => 'rejected',
+                    'catatan' => $validated['alasan_penolakan'],
+                    'tanggal_approval' => now(),
+                    'status_at_approval' => $currentStatus,
                 ]);
             }
 
@@ -744,19 +842,13 @@ class TransactionController extends Controller
     private function getNextStatusAfterApproval($currentStatus, $role)
     {
         $statusFlow = [
-            'menunggu_pejabat_1' => [
-                'pejabat_1' => 'diskusi_pra_permohonan',
-            ],
             'diskusi_pra_permohonan' => [
-                'pejabat_2' => 'menunggu_pejabat_2',
+                'pejabat_1' => 'pemeriksaan_tahap_1',
             ],
-            'menunggu_pejabat_2' => [
+            'pemeriksaan_tahap_1' => [
                 'pejabat_2' => 'pemeriksaan_tahap_2',
             ],
             'pemeriksaan_tahap_2' => [
-                'pejabat_2' => 'menunggu_pejabat_3',
-            ],
-            'menunggu_pejabat_3' => [
                 'pejabat_3' => 'menunggu_pejabat_4',
             ],
             'menunggu_pejabat_4' => [
@@ -780,13 +872,11 @@ class TransactionController extends Controller
     {
         $labels = [
             'draft' => '<span class="badge bg-secondary">Draft</span>',
-            'menunggu_pejabat_1' => '<span class="badge bg-warning">Menunggu Pejabat 1</span>',
-            'diskusi_pra_permohonan' => '<span class="badge bg-info">Diskusi Pra-Permohonan</span>',
-            'menunggu_pejabat_2' => '<span class="badge bg-warning">Menunggu Pejabat 2</span>',
-            'pemeriksaan_tahap_2' => '<span class="badge bg-info">Pemeriksaan Tahap 2</span>',
-            'menunggu_pejabat_3' => '<span class="badge bg-warning">Menunggu Pejabat 3</span>',
-            'dilengkapi' => '<span class="badge bg-primary">Dilengkapi</span>',
+            'diskusi_pra_permohonan' => '<span class="badge bg-warning">Diskusi Pra-Permohonan</span>',
+            'pemeriksaan_tahap_1' => '<span class="badge bg-warning">Pemeriksaan Tahap 1</span>',
+            'pemeriksaan_tahap_2' => '<span class="badge bg-warning">Pemeriksaan Tahap 2</span>',
             'menunggu_pejabat_4' => '<span class="badge bg-warning">Menunggu Pejabat 4</span>',
+            'dilengkapi' => '<span class="badge bg-primary">Dilengkapi</span>',
             'disetujui_pejabat_4' => '<span class="badge bg-success">Disetujui Pejabat 4</span>',
             'diinformasikan' => '<span class="badge bg-info">Diinformasikan</span>',
             'selesai' => '<span class="badge bg-success">Selesai</span>',
@@ -795,5 +885,54 @@ class TransactionController extends Controller
         ];
 
         return $labels[$status] ?? '<span class="badge bg-secondary">' . $status . '</span>';
+    }
+
+    /**
+     * Download Excel file
+     */
+    public function downloadExcel(Transaction $transaction)
+    {
+        if (!$transaction->excel_path || !Storage::disk('public')->exists($transaction->excel_path)) {
+            abort(404, 'File Excel tidak ditemukan');
+        }
+
+        $filePath = storage_path('app/public/' . $transaction->excel_path);
+        $fileName = 'Form_Approval_' . str_replace(['/', '\\', '.'], '_', $transaction->nomor_transaksi) . '.xlsx';
+        
+        return response()->download($filePath, $fileName);
+    }
+
+    /**
+     * Download all attachments as ZIP
+     */
+    public function downloadAll(Transaction $transaction)
+    {
+        $zip = new \ZipArchive();
+        $zipFileName = 'Lampiran_' . str_replace(['/', '.'], '_', $transaction->nomor_transaksi) . '_' . time() . '.zip';
+        $zipPath = storage_path('app/public/temp/' . $zipFileName);
+
+        // Create temp directory if not exists
+        Storage::disk('public')->makeDirectory('temp');
+
+        if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== TRUE) {
+            abort(500, 'Gagal membuat file ZIP');
+        }
+
+        // Add Excel file
+        if ($transaction->excel_path && Storage::disk('public')->exists($transaction->excel_path)) {
+            $excelPath = storage_path('app/public/' . $transaction->excel_path);
+            $zip->addFile($excelPath, 'Form_Approval_' . $transaction->nomor_transaksi . '.xlsx');
+        }
+
+        // Add uploaded document
+        if ($transaction->lampiran_dokumen && Storage::disk('public')->exists($transaction->lampiran_dokumen)) {
+            $docPath = storage_path('app/public/' . $transaction->lampiran_dokumen);
+            $docName = 'Lampiran_' . basename($transaction->lampiran_dokumen);
+            $zip->addFile($docPath, $docName);
+        }
+
+        $zip->close();
+
+        return response()->download($zipPath)->deleteFileAfterSend(true);
     }
 }

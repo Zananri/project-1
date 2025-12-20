@@ -16,6 +16,7 @@ class TransactionApproval extends Model
         'status',
         'catatan',
         'tanggal_approval',
+        'status_at_approval',
     ];
 
     protected $casts = [

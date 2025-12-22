@@ -32,9 +32,19 @@
                                     <h6 class="mb-0">Status: 
                                         <strong>{{ ucwords(str_replace('_', ' ', $transaction->status)) }}</strong>
                                     </h6>
-                                    @if($transaction->alasan_penolakan && in_array($transaction->status, ['ditolak', 'dilengkapi']))
+                                    @if($transaction->alasan_penolakan && in_array($transaction->status, ['ditolak', 'dilengkapi', 'disetujui_bersyarat']))
                                     <hr>
-                                    <p class="mb-0"><strong>Alasan:</strong> {{ $transaction->alasan_penolakan }}</p>
+                                    <p class="mb-0">
+                                        <strong>
+                                            @if($transaction->status === 'ditolak')
+                                            Alasan Penolakan:
+                                            @elseif($transaction->status === 'dilengkapi')
+                                            Catatan Kelengkapan:
+                                            @elseif($transaction->status === 'disetujui_bersyarat')
+                                            Syarat Persetujuan:
+                                            @endif
+                                        </strong> {{ $transaction->alasan_penolakan }}
+                                    </p>
                                     @endif
                                 </div>
                             </div>
@@ -307,7 +317,7 @@
                                 @if($transaction->isBackwardFlow())
                                     <h6 class="mb-3">Tindakan Penerusan</h6>
                                     <div class="d-flex gap-2">
-                                        @if($transaction->status === 'disetujui_pejabat_4')
+                                        @if($transaction->status === 'disetujui_pejabat_4' || $transaction->status === 'disetujui_bersyarat')
                                         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#approveModal">
                                             <i class="bi bi-send"></i> Teruskan ke Pejabat 2
                                         </button>
@@ -326,9 +336,14 @@
                                         <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal">
                                             <i class="bi bi-x-circle"></i> Tolak
                                         </button>
-                                        @if(Auth::user()->role === 'pejabat_2')
+                                        @if(Auth::user()->role === 'pejabat_3')
                                         <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#requestCompletionModal">
                                             <i class="bi bi-arrow-clockwise"></i> Minta Kelengkapan
+                                        </button>
+                                        @endif
+                                        @if(Auth::user()->role === 'pejabat_4')
+                                        <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#conditionalApproveModal">
+                                            <i class="bi bi-check-circle-fill"></i> Setujui Bersyarat
                                         </button>
                                         @endif
                                     </div>
@@ -343,11 +358,36 @@
                 @if($transaction->status === 'selesai' && $transaction->user_id === Auth::id())
                 <div class="row mt-4">
                     <div class="col-12">
-                        <div class="card bg-success text-white">
+                        @php
+                            // Check if approval is conditional
+                            $pejabat4Approval = $transaction->approvals()
+                                ->where('role', 'pejabat_4')
+                                ->whereIn('status', ['approved', 'conditional'])
+                                ->first();
+                            $isConditional = $pejabat4Approval && $pejabat4Approval->status === 'conditional';
+                        @endphp
+                        
+                        <div class="card {{ $isConditional ? 'bg-info' : 'bg-success' }} text-white">
                             <div class="card-body">
-                                <h5 class="mb-3"><i class="bi bi-check-circle-fill"></i> Transaksi Telah Disetujui</h5>
-                                <p class="mb-2">Selamat! Formulir Pengajuan transaksi Anda telah disetujui oleh semua Pejabat yang berwenang.</p>
-                                <p class="mb-0">Anda dapat melakukan arsip dokumen ini sebagai dasar untuk melaksanakan transaksi.</p>
+                                <h5 class="mb-3">
+                                    <i class="bi bi-check-circle-fill"></i> 
+                                    Transaksi Telah {{ $isConditional ? 'Disetujui Bersyarat' : 'Disetujui' }}
+                                </h5>
+                                
+                                @if($isConditional)
+                                    <p class="mb-2">Formulir Pengajuan transaksi Anda telah disetujui bersyarat oleh semua Pejabat yang berwenang.</p>
+                                    <p class="mb-3"><strong>Perhatian:</strong> Terdapat syarat/ketentuan yang harus dipenuhi dalam pelaksanaan transaksi ini.</p>
+                                    
+                                    @if($pejabat4Approval->catatan)
+                                    <div class="alert alert-warning mb-0">
+                                        <h6 class="mb-2"><i class="bi bi-exclamation-triangle-fill"></i> Syarat Persetujuan dari Pejabat 4:</h6>
+                                        <p class="mb-0">{{ $pejabat4Approval->catatan }}</p>
+                                    </div>
+                                    @endif
+                                @else
+                                    <p class="mb-2">Selamat! Formulir Pengajuan transaksi Anda telah disetujui oleh semua Pejabat yang berwenang.</p>
+                                    <p class="mb-0">Anda dapat melakukan arsip dokumen ini sebagai dasar untuk melaksanakan transaksi.</p>
+                                @endif
                             </div>
                         </div>
                     </div>
@@ -381,7 +421,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 @if($transaction->isBackwardFlow())
-                    @if($transaction->status === 'disetujui_pejabat_4')
+                    @if($transaction->status === 'disetujui_pejabat_4' || $transaction->status === 'disetujui_bersyarat')
                     <h5 class="modal-title">Teruskan ke Pejabat 2</h5>
                     @elseif($transaction->status === 'diinformasikan')
                     <h5 class="modal-title">Selesaikan & Kirim ke Pemohon</h5>
@@ -396,6 +436,8 @@
                     @if($transaction->isBackwardFlow())
                         @if($transaction->status === 'disetujui_pejabat_4')
                         <p>Transaksi telah disetujui oleh Pejabat 4. Anda akan melampirkan bukti approval dan meneruskannya ke Pejabat 2.</p>
+                        @elseif($transaction->status === 'disetujui_bersyarat')
+                        <p>Transaksi telah disetujui bersyarat oleh Pejabat 4. Anda akan melampirkan bukti approval dan meneruskannya ke Pejabat 2.</p>
                         @elseif($transaction->status === 'diinformasikan')
                         <p>Anda akan menyelesaikan proses approval dan meneruskan formulir yang telah disetujui kepada Pemohon.</p>
                         @endif
@@ -460,6 +502,33 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
                     <button type="submit" class="btn btn-warning">Kirim</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Conditional Approve Modal -->
+<div class="modal fade" id="conditionalApproveModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title">Setujui Bersyarat</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="conditionalApproveForm">
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> Persetujuan bersyarat memerlukan catatan/syarat yang harus dipenuhi.
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label required">Catatan Syarat</label>
+                        <textarea class="form-control" name="catatan" rows="4" required placeholder="Tuliskan syarat atau kondisi yang harus dipenuhi..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn btn-info">Setujui Bersyarat</button>
                 </div>
             </form>
         </div>

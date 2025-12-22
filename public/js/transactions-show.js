@@ -161,6 +161,51 @@ $(document).ready(function() {
         });
     }
 
+    // Conditional approve form submit
+    $('#conditionalApproveForm').on('submit', function(e) {
+        e.preventDefault();
+        
+        if (!$('#conditionalApproveForm textarea[name="catatan"]').val()) {
+            showError('Catatan syarat harus diisi');
+            return;
+        }
+        
+        showConfirmation(
+            'Setujui Bersyarat?',
+            'Apakah Anda yakin ingin menyetujui transaksi ini dengan syarat?',
+            function() {
+                conditionalApprove();
+            }
+        );
+    });
+
+    function conditionalApprove() {
+        showLoading();
+        
+        let formData = {
+            catatan: $('#conditionalApproveForm textarea[name="catatan"]').val()
+        };
+        
+        $.ajax({
+            url: `/transactions/${transactionId}/conditional-approve`,
+            type: 'POST',
+            data: formData,
+            success: function(response) {
+                hideLoading();
+                $('#conditionalApproveModal').modal('hide');
+                
+                if (response.success) {
+                    showSuccess(response.message, function() {
+                        location.reload();
+                    });
+                } else {
+                    showError(response.message);
+                }
+            },
+            error: handleAjaxError
+        });
+    }
+
     // Reset modal forms when closed
     $('.modal').on('hidden.bs.modal', function() {
         $(this).find('form')[0].reset();

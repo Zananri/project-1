@@ -73,12 +73,13 @@ class Transaction extends Model
     public function getCurrentApprovalStep()
     {
         $statusMap = [
-            'diskusi_pra_permohonan' => 'pejabat_1',
-            'pemeriksaan_tahap_1' => 'pejabat_2',
+            'pemeriksaan_tahap_1' => 'pejabat_1',
+            'diskusi_pra_permohonan' => 'pejabat_2',
             'pemeriksaan_tahap_2' => 'pejabat_3',
             'menunggu_pejabat_4' => 'pejabat_4',
-            'dilengkapi' => 'pejabat_2',
+            'dilengkapi' => 'pejabat_3', // Kembali ke Pejabat 3 setelah dilengkapi
             'disetujui_pejabat_4' => 'pejabat_3', // Backward: P3 menerima dari P4
+            'disetujui_bersyarat' => 'pejabat_3', // Backward: P3 menerima dari P4 (conditional)
             'diinformasikan' => 'pejabat_2', // Backward: P2 menerima dari P3
         ];
 
@@ -87,13 +88,18 @@ class Transaction extends Model
 
     public function canBeApprovedBy($role)
     {
+        // Saat status dilengkapi, Pejabat 3 tidak bisa approve (menunggu pemohon melengkapi data)
+        if ($this->status === 'dilengkapi') {
+            return false;
+        }
+
         // Check if current step matches the role
         if ($this->getCurrentApprovalStep() !== $role) {
             return false;
         }
 
         // For backward flow statuses, allow action without checking approval history
-        if (in_array($this->status, ['disetujui_pejabat_4', 'diinformasikan'])) {
+        if (in_array($this->status, ['disetujui_pejabat_4', 'disetujui_bersyarat', 'diinformasikan'])) {
             return true;
         }
 
@@ -109,7 +115,7 @@ class Transaction extends Model
 
     public function isBackwardFlow()
     {
-        return in_array($this->status, ['disetujui_pejabat_4', 'diinformasikan']);
+        return in_array($this->status, ['disetujui_pejabat_4', 'disetujui_bersyarat', 'diinformasikan']);
     }
 
     protected static function boot()

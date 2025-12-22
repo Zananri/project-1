@@ -25,6 +25,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/transactions/{transaction}/approve', [TransactionController::class, 'approve'])->name('transactions.approve');
     Route::post('/transactions/{transaction}/reject', [TransactionController::class, 'reject'])->name('transactions.reject');
     Route::post('/transactions/{transaction}/request-completion', [TransactionController::class, 'requestCompletion'])->name('transactions.requestCompletion');
+    Route::post('/transactions/{transaction}/conditional-approve', [TransactionController::class, 'conditionalApprove'])->name('transactions.conditionalApprove');
 });
 
 require __DIR__.'/auth.php';

@@ -52,6 +52,7 @@ class TransactionApproval extends Model
             'approved' => 'success',
             'rejected' => 'danger',
             'completed' => 'info',
+            'conditional' => 'info',
         ];
 
         return $badges[$this->status] ?? 'secondary';

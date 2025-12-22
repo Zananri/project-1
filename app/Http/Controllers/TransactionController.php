@@ -257,7 +257,7 @@ class TransactionController extends Controller
                 'nama_pemohon' => $validated['nama_pemohon'],
                 'nama_perusahaan' => $validated['nama_perusahaan'],
                 'tanggal_pengajuan' => $validated['tanggal_pengajuan'],
-                'status' => 'diskusi_pra_permohonan',
+                'status' => 'pemeriksaan_tahap_1',
                 'keterangan' => $validated['keterangan'] ?? null,
             ];
             
@@ -508,12 +508,12 @@ class TransactionController extends Controller
                 // Also clear alasan_penolakan since data has been completed
                 if ($targetRole === 'pejabat_2') {
                     $transaction->update([
-                        'status' => 'pemeriksaan_tahap_2',
+                        'status' => 'diskusi_pra_permohonan',
                         'alasan_penolakan' => null,
                     ]);
                 } elseif ($targetRole === 'pejabat_3') {
                     $transaction->update([
-                        'status' => 'menunggu_pejabat_3',
+                        'status' => 'pemeriksaan_tahap_2',
                         'alasan_penolakan' => null,
                     ]);
                 }
@@ -793,10 +793,10 @@ class TransactionController extends Controller
         try {
             $user = Auth::user();
 
-            if ($user->role !== 'pejabat_2') {
+            if ($user->role !== 'pejabat_3') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Hanya Pejabat 2 yang dapat meminta kelengkapan data.',
+                    'message' => 'Hanya Pejabat 3 yang dapat meminta kelengkapan data.',
                 ], 403);
             }
 
@@ -837,15 +837,87 @@ class TransactionController extends Controller
     }
 
     /**
+     * Conditional approve by Pejabat 4
+     */
+    public function conditionalApprove(Request $request, Transaction $transaction)
+    {
+        try {
+            $user = Auth::user();
+
+            if ($user->role !== 'pejabat_4') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hanya Pejabat 4 yang dapat menyetujui bersyarat.',
+                ], 403);
+            }
+
+            if (!$transaction->canBeApprovedBy($user->role)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Transaksi tidak dalam tahap persetujuan Anda.',
+                ], 400);
+            }
+
+            $validated = $request->validate([
+                'catatan' => 'required|string',
+            ]);
+
+            DB::beginTransaction();
+
+            // Save current status before update
+            $currentStatus = $transaction->status;
+
+            // Update or create approval record
+            $approval = $transaction->getApprovalByRole($user->role);
+            if ($approval) {
+                $approval->update([
+                    'status' => 'conditional',
+                    'catatan' => $validated['catatan'],
+                    'tanggal_approval' => now(),
+                    'status_at_approval' => $currentStatus,
+                ]);
+            } else {
+                TransactionApproval::create([
+                    'transaction_id' => $transaction->id,
+                    'role' => $user->role,
+                    'status' => 'conditional',
+                    'catatan' => $validated['catatan'],
+                    'tanggal_approval' => now(),
+                    'status_at_approval' => $currentStatus,
+                ]);
+            }
+
+            // Update transaction status to disetujui_bersyarat
+            $transaction->update([
+                'status' => 'disetujui_bersyarat',
+                'alasan_penolakan' => $validated['catatan'], // Store condition here
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Transaksi berhasil disetujui dengan syarat',
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menyetujui bersyarat: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Get next status after approval based on current status and role
      */
     private function getNextStatusAfterApproval($currentStatus, $role)
     {
         $statusFlow = [
-            'diskusi_pra_permohonan' => [
-                'pejabat_1' => 'pemeriksaan_tahap_1',
-            ],
             'pemeriksaan_tahap_1' => [
+                'pejabat_1' => 'diskusi_pra_permohonan',
+            ],
+            'diskusi_pra_permohonan' => [
                 'pejabat_2' => 'pemeriksaan_tahap_2',
             ],
             'pemeriksaan_tahap_2' => [
@@ -855,6 +927,9 @@ class TransactionController extends Controller
                 'pejabat_4' => 'disetujui_pejabat_4',
             ],
             'disetujui_pejabat_4' => [
+                'pejabat_3' => 'diinformasikan',
+            ],
+            'disetujui_bersyarat' => [
                 'pejabat_3' => 'diinformasikan',
             ],
             'diinformasikan' => [
@@ -878,11 +953,13 @@ class TransactionController extends Controller
             'menunggu_pejabat_4' => '<span class="badge bg-warning">Menunggu Pejabat 4</span>',
             'dilengkapi' => '<span class="badge bg-primary">Dilengkapi</span>',
             'disetujui_pejabat_4' => '<span class="badge bg-success">Disetujui Pejabat 4</span>',
+            'disetujui_bersyarat' => '<span class="badge bg-info">Disetujui Bersyarat</span>',
             'diinformasikan' => '<span class="badge bg-info">Diinformasikan</span>',
             'selesai' => '<span class="badge bg-success">Selesai</span>',
             'ditolak' => '<span class="badge bg-danger">Ditolak</span>',
             'ajukan_ulang' => '<span class="badge bg-warning">Ajukan Ulang</span>',
         ];
+
 
         return $labels[$status] ?? '<span class="badge bg-secondary">' . $status . '</span>';
     }

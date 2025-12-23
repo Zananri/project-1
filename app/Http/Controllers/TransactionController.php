@@ -4,11 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\Transaction;
 use App\Models\TransactionApproval;
+use App\Models\TransactionItem;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use App\Services\ExcelGeneratorService;
 
 class TransactionController extends Controller
 {
@@ -442,20 +444,44 @@ class TransactionController extends Controller
                 ], 403);
             }
 
-            $validated = $request->validate([
-                'nama_pemohon' => 'required|string|max:255',
-                'nama_perusahaan' => 'required|string|max:255',
-                'tanggal_pengajuan' => 'required|date',
-                'uraian_transaksi' => 'required|string',
-                'total' => 'required|numeric|min:0',
-                'dasar_transaksi' => 'nullable|string',
-                'lawan_transaksi' => 'nullable|string|max:255',
-                'rekening_transaksi' => 'nullable|string|max:255',
-                'rencana_tanggal_transaksi' => 'nullable|date',
-                'pengakuan_transaksi' => 'nullable|string|max:255',
-                'keterangan' => 'nullable|string',
-                'lampiran_dokumen' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,jpg,jpeg,png|max:5120',
-            ]);
+            // Check if using detailed mode (multiple items)
+            $isDetailed = $request->has('use_detailed_mode') && $request->use_detailed_mode == '1';
+            
+            if ($isDetailed) {
+                // Detailed mode validation
+                $validated = $request->validate([
+                    'nama_pemohon' => 'required|string|max:255',
+                    'nama_perusahaan' => 'required|string|max:255',
+                    'tanggal_pengajuan' => 'required|date',
+                    'lampiran_dokumen' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,jpg,jpeg,png|max:5120',
+                    'items' => 'required|array|min:1',
+                    'items.*.uraian_transaksi' => 'required|string',
+                    'items.*.kebutuhan' => 'required|string',
+                    'items.*.total' => 'required|numeric|min:0',
+                    'items.*.dasar_transaksi' => 'nullable|string',
+                    'items.*.lawan_transaksi' => 'nullable|string',
+                    'items.*.rekening_transaksi' => 'nullable|string',
+                    'items.*.rencana_tanggal_transaksi' => 'nullable|date',
+                    'items.*.pengakuan_transaksi' => 'nullable|string',
+                    'items.*.keterangan_item' => 'nullable|string',
+                ]);
+            } else {
+                // Simple mode validation
+                $validated = $request->validate([
+                    'nama_pemohon' => 'required|string|max:255',
+                    'nama_perusahaan' => 'required|string|max:255',
+                    'tanggal_pengajuan' => 'required|date',
+                    'uraian_transaksi' => 'required|string',
+                    'total' => 'required|numeric|min:0',
+                    'dasar_transaksi' => 'nullable|string',
+                    'lawan_transaksi' => 'nullable|string|max:255',
+                    'rekening_transaksi' => 'nullable|string|max:255',
+                    'rencana_tanggal_transaksi' => 'nullable|date',
+                    'pengakuan_transaksi' => 'nullable|string|max:255',
+                    'keterangan' => 'nullable|string',
+                    'lampiran_dokumen' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx,jpg,jpeg,png|max:5120',
+                ]);
+            }
 
             DB::beginTransaction();
 
@@ -475,7 +501,64 @@ class TransactionController extends Controller
             // Check if transaction was in dilengkapi status before update
             $wasDilengkapi = $transaction->status === 'dilengkapi';
             
-            $transaction->update($validated);
+            // Update transaction basic data
+            $transactionData = [
+                'nama_pemohon' => $validated['nama_pemohon'],
+                'nama_perusahaan' => $validated['nama_perusahaan'],
+                'tanggal_pengajuan' => $validated['tanggal_pengajuan'],
+            ];
+
+            if ($isDetailed) {
+                // For detailed mode, calculate total from items
+                $totalAmount = collect($validated['items'])->sum('total');
+                $transactionData['total'] = $totalAmount;
+                $transactionData['uraian_transaksi'] = 'Multiple items - see details';
+            } else {
+                // For simple mode
+                $transactionData['uraian_transaksi'] = $validated['uraian_transaksi'];
+                $transactionData['total'] = $validated['total'];
+                $transactionData['dasar_transaksi'] = $validated['dasar_transaksi'] ?? null;
+                $transactionData['lawan_transaksi'] = $validated['lawan_transaksi'] ?? null;
+                $transactionData['rekening_transaksi'] = $validated['rekening_transaksi'] ?? null;
+                $transactionData['rencana_tanggal_transaksi'] = $validated['rencana_tanggal_transaksi'] ?? null;
+                $transactionData['pengakuan_transaksi'] = $validated['pengakuan_transaksi'] ?? null;
+                $transactionData['keterangan'] = $validated['keterangan'] ?? null;
+            }
+
+            if (isset($validated['lampiran_dokumen'])) {
+                $transactionData['lampiran_dokumen'] = $validated['lampiran_dokumen'];
+            }
+
+            $transaction->update($transactionData);
+
+            // Handle items for detailed mode
+            if ($isDetailed) {
+                // Delete all existing items
+                $transaction->items()->delete();
+
+                // Create new items from request
+                $urutan = 1;
+                foreach ($validated['items'] as $itemData) {
+                    TransactionItem::create([
+                        'transaction_id' => $transaction->id,
+                        'urutan' => $urutan++,
+                        'uraian_transaksi' => $itemData['uraian_transaksi'],
+                        'kebutuhan' => $itemData['kebutuhan'],
+                        'total' => $itemData['total'],
+                        'dasar_transaksi' => $itemData['dasar_transaksi'] ?? null,
+                        'lawan_transaksi' => $itemData['lawan_transaksi'] ?? null,
+                        'rekening_transaksi' => $itemData['rekening_transaksi'] ?? null,
+                        'rencana_tanggal_transaksi' => $itemData['rencana_tanggal_transaksi'] ?? null,
+                        'pengakuan_transaksi' => $itemData['pengakuan_transaksi'] ?? null,
+                        'keterangan_item' => $itemData['keterangan_item'] ?? null,
+                    ]);
+                }
+
+                // Regenerate Excel file with updated items
+                $excelGenerator = new ExcelGeneratorService();
+                $excelPath = $excelGenerator->generateTransactionExcel($transaction);
+                $transaction->update(['excel_path' => $excelPath]);
+            }
 
             // If status was "dilengkapi", handle re-submission after completion
             if ($wasDilengkapi) {

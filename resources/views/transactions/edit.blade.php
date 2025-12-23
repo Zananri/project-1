@@ -59,6 +59,7 @@
                             <input type="date" class="form-control" id="tanggal_pengajuan" name="tanggal_pengajuan" value="{{ $transaction->tanggal_pengajuan->format('Y-m-d') }}" required>
                         </div>
 
+                        @if(!$transaction->hasItems())
                         <div class="col-md-6 mb-3">
                             <label for="total" class="form-label required">5. Total</label>
                             <div class="input-group">
@@ -66,8 +67,96 @@
                                 <input type="text" class="form-control money-format" id="total" name="total" value="{{ number_format($transaction->total, 0, ',', '.') }}" required>
                             </div>
                         </div>
+                        @endif
                     </div>
 
+                    @if($transaction->hasItems())
+                    <!-- DETAILED MODE - Multiple Items -->
+                    <input type="hidden" name="use_detailed_mode" value="1">
+                    
+                    <div class="row">
+                        <div class="col-12 mb-3">
+                            <label class="form-label required">4. Detail Item Transaksi</label>
+                            <div class="card">
+                                <div class="card-body">
+                                    <div id="itemsContainer">
+                                        @foreach($transaction->items as $index => $item)
+                                        <div class="item-group mb-4 border-bottom pb-3" data-index="{{ $index }}">
+                                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                                <h6 class="mb-0">Item #<span class="item-number">{{ $index + 1 }}</span></h6>
+                                                @if($index > 0)
+                                                <button type="button" class="btn btn-sm btn-danger remove-item">
+                                                    <i class="bi bi-trash"></i> Hapus
+                                                </button>
+                                                @endif
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label required">Uraian Transaksi</label>
+                                                    <input type="text" class="form-control" name="items[{{ $index }}][uraian_transaksi]" value="{{ $item->uraian_transaksi }}" required>
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label required">Kebutuhan</label>
+                                                    <input type="text" class="form-control" name="items[{{ $index }}][kebutuhan]" value="{{ $item->kebutuhan }}" required>
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label required">Total</label>
+                                                    <div class="input-group">
+                                                        <span class="input-group-text">Rp</span>
+                                                        <input type="text" class="form-control money-format" name="items[{{ $index }}][total]" value="{{ number_format($item->total, 0, ',', '.') }}" required>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Dasar Transaksi</label>
+                                                    <input type="text" class="form-control" name="items[{{ $index }}][dasar_transaksi]" value="{{ $item->dasar_transaksi }}">
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Lawan Transaksi</label>
+                                                    <input type="text" class="form-control" name="items[{{ $index }}][lawan_transaksi]" value="{{ $item->lawan_transaksi }}">
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Rekening Transaksi</label>
+                                                    <input type="text" class="form-control" name="items[{{ $index }}][rekening_transaksi]" value="{{ $item->rekening_transaksi }}">
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Rencana Tanggal Transaksi</label>
+                                                    <input type="date" class="form-control" name="items[{{ $index }}][rencana_tanggal_transaksi]" value="{{ $item->rencana_tanggal_transaksi ? $item->rencana_tanggal_transaksi->format('Y-m-d') : '' }}">
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Pengakuan Transaksi</label>
+                                                    <input type="text" class="form-control" name="items[{{ $index }}][pengakuan_transaksi]" value="{{ $item->pengakuan_transaksi }}">
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-12 mb-3">
+                                                    <label class="form-label">Keterangan Item</label>
+                                                    <textarea class="form-control" name="items[{{ $index }}][keterangan_item]" rows="2">{{ $item->keterangan_item }}</textarea>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        @endforeach
+                                    </div>
+
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="addItemBtn">
+                                        <i class="bi bi-plus-circle"></i> Tambah Item
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    @else
+                    <!-- SIMPLE MODE - Single Item -->
                     <div class="row">
                         <div class="col-12 mb-3">
                             <label for="uraian_transaksi" class="form-label required">4. Uraian Transaksi</label>
@@ -105,13 +194,16 @@
                             <input type="text" class="form-control" id="pengakuan_transaksi" name="pengakuan_transaksi" value="{{ $transaction->pengakuan_transaksi }}">
                         </div>
                     </div>
+                    @endif
 
+                    @if(!$transaction->hasItems())
                     <div class="row">
                         <div class="col-12 mb-3">
                             <label for="keterangan" class="form-label">11. Keterangan</label>
                             <textarea class="form-control" id="keterangan" name="keterangan" rows="3">{{ $transaction->keterangan }}</textarea>
                         </div>
                     </div>
+                    @endif
 
                     <div class="row">
                         <div class="col-12 mb-3">
